@@ -9,7 +9,7 @@
     "web": "expo start --web",
     "build:android": "eas build -p android",
     "build:ios": "eas build -p ios",
-    "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
+    "lint": "eslint . --ext .js,.jsx,.ts,.tsx --max-warnings=5",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {

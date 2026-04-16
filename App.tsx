@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react'
-import { SafeAreaView, StatusBar, StyleSheet, View } from 'react-native'
+import { SafeAreaView, StatusBar, StyleSheet } from 'react-native'
 import { NavigationContainer } from '@react-navigation/native'
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
 import { Provider as PaperProvider } from 'react-native-paper'
@@ -38,7 +38,7 @@ function AppContent() {
   // 应用启动时加载数据
   useEffect(() => {
     loadHistory()
-  }, [])
+  }, [loadHistory])
 
   return (
     <Tab.Navigator
