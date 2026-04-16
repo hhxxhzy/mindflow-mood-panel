@@ -10,7 +10,8 @@
     "build:android": "eas build -p android",
     "build:ios": "eas build -p ios",
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx --max-warnings=5",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "test": "echo \"No tests configured yet\" && exit 0"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^1.21.0",
