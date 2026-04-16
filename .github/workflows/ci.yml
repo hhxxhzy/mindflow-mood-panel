@@ -1,0 +1,155 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  # 代码质量检查
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript type check
+        run: npx tsc --noEmit
+
+      - name: ESLint check
+        run: npm run lint
+
+      - name: Run tests
+        run: npm test
+
+  # Android 构建
+  android-build:
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Android build
+        uses: react-native-community/react-native-android-build@v1
+        with:
+          gradle-version: '8.5'
+          build-type: 'Release'
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
+
+  # iOS 构建 (需要 macOS)
+  ios-build:
+    runs-on: macos-latest
+    needs: lint-and-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install CocoaPods dependencies
+        run: |
+          cd ios && pod install
+
+      - name: iOS build
+        run: |
+          cd ios
+          xcodebuild -workspace MindFlow.xcworkspace -scheme MindFlow -configuration Release -archivePath $PWD/build/MindFlow.xcarchive archive
+
+      - name: Export iOS IPA
+        run: |
+          cd ios
+          xcodebuild -exportArchive -archivePath $PWD/build/MindFlow.xcarchive -exportOptionsPlist ExportOptions.plist -exportPath $PWD/build
+
+      - name: Upload iOS IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: ios/build/MindFlow.ipa
+
+  # 发布到 GitHub Releases
+  release:
+    runs-on: ubuntu-latest
+    needs: [android-build, ios-build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Download Android APK
+        uses: actions/download-artifact@v4
+        with:
+          name: android-apk
+
+      - name: Download iOS IPA
+        uses: actions/download-artifact@v4
+        with:
+          name: ios-ipa
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ github.run_number }}
+          name: Release v${{ github.run_number }}
+          body: |
+            ## 版本更新说明
+            
+            ### 🚀 新功能
+            - 自动构建的移动端应用
+            
+            ### 📱 平台支持
+            - Android APK
+            - iOS IPA
+            
+            ### 📦 下载链接
+            请下载对应平台的安装包进行安装
+            
+            ### 🔧 构建信息
+            - 构建编号: ${{ github.run_number }}
+            - 提交: ${{ github.sha }}
+            - 时间: ${{ github.event.head_commit.timestamp }}
+          draft: false
+          prerelease: false
+          files: |
+            app-release.apk
+            MindFlow.ipa

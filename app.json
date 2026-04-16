@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "MindFlow",
+    "slug": "mindflow",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.svg",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.yourcompany.mindflow"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.yourcompany.mindflow"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "4cb2bc39-67a5-432f-b20a-1fb040960250"
+      }
+    },
+    "owner": "huangziyins-organization"
+  }
+}

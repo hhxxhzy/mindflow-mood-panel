@@ -1,0 +1,261 @@
+name: Full CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+  EAS_PROJECT_ID: ${{ secrets.EAS_PROJECT_ID }}
+
+jobs:
+  # 1. 代码质量检查
+  quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
+      - name: ESLint check
+        run: npm run lint
+
+      - name: Run tests
+        run: npm test
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            coverage/
+            test-results/
+
+  # 2. Expo EAS 构建 (预览版)
+  eas-build-preview:
+    name: EAS Build (Preview)
+    runs-on: ubuntu-latest
+    needs: quality
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup Expo
+        run: npm install -g eas-cli
+
+      - name: Login to Expo
+        if: env.EXPO_TOKEN != ''
+        run: eas login --token $EXPO_TOKEN
+
+      - name: Build Android Preview
+        if: env.EXPO_TOKEN != ''
+        run: eas build --platform android --profile preview --non-interactive
+
+      - name: Build iOS Preview
+        if: env.EXPO_TOKEN != ''
+        run: eas build --platform ios --profile preview --non-interactive
+
+      - name: Save build artifacts info
+        run: |
+          echo "Preview builds completed" > build-info.txt
+          date >> build-info.txt
+          echo "Branch: ${{ github.ref }}" >> build-info.txt
+          echo "Commit: ${{ github.sha }}" >> build-info.txt
+
+      - name: Upload build info
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-info
+          path: build-info.txt
+
+  # 3. Expo EAS 构建 (生产版) - 仅 main 分支
+  eas-build-production:
+    name: EAS Build (Production)
+    runs-on: ubuntu-latest
+    needs: quality
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup Expo
+        run: npm install -g eas-cli
+
+      - name: Login to Expo
+        if: env.EXPO_TOKEN != ''
+        run: eas login --token $EXPO_TOKEN
+
+      - name: Update app version
+        run: |
+          # 自动增加版本号
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          echo "Current version: $CURRENT_VERSION"
+          
+          # 分割版本号
+          IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION"
+          MAJOR=${VERSION_PARTS[0]}
+          MINOR=${VERSION_PARTS[1]}
+          PATCH=${VERSION_PARTS[2]}
+          
+          # 增加修订版本号
+          NEW_PATCH=$((PATCH + 1))
+          NEW_VERSION="$MAJOR.$MINOR.$NEW_PATCH"
+          echo "New version: $NEW_VERSION"
+          
+          # 更新 package.json
+          npm version $NEW_VERSION --no-git-tag-version
+          
+          # 更新 app.json
+          if [ -f "app.json" ]; then
+            jq --arg version "$NEW_VERSION" '.expo.version = $version' app.json > app.json.tmp && mv app.json.tmp app.json
+          fi
+
+      - name: Build Android Production
+        if: env.EXPO_TOKEN != ''
+        run: eas build --platform android --profile production --non-interactive
+
+      - name: Build iOS Production
+        if: env.EXPO_TOKEN != ''
+        run: eas build --platform ios --profile production --non-interactive
+
+      - name: Create GitHub Release
+        if: env.EXPO_TOKEN != ''
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ github.run_number }}
+          name: Release v${{ github.run_number }}
+          body: |
+            ## 🚀 MindFlow 生产版本
+            
+            ### 版本信息
+            - **构建编号**: ${{ github.run_number }}
+            - **提交**: [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+            - **时间**: ${{ github.event.head_commit.timestamp }}
+            
+            ### 📱 平台支持
+            - Android APK/AAB
+            - iOS IPA
+            
+            ### 📋 变更日志
+            ${{ github.event.head_commit.message }}
+            
+            ### 🔗 下载链接
+            请通过 Expo EAS 控制台下载构建产物
+            
+            ### 🛠️ 构建配置
+            - 使用 Expo Application Services (EAS)
+            - 生产环境配置
+            - 自动版本递增
+          draft: false
+          prerelease: false
+
+  # 4. 部署到 Firebase App Distribution (可选)
+  firebase-distribution:
+    name: Firebase Distribution
+    runs-on: ubuntu-latest
+    needs: eas-build-production
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Download Android APK
+        uses: actions/download-artifact@v4
+        with:
+          name: android-apk
+          path: ./dist
+
+      - name: Authenticate to Firebase
+        if: env.FIREBASE_TOKEN != ''
+        run: firebase login:ci --token $FIREBASE_TOKEN
+
+      - name: Distribute to Firebase App Distribution
+        if: env.FIREBASE_TOKEN != '' && env.FIREBASE_PROJECT != ''
+        run: |
+          firebase appdistribution:distribute ./dist/app-release.apk \
+            --app $FIREBASE_ANDROID_APP_ID \
+            --groups "testers" \
+            --release-notes "自动构建版本 ${{ github.run_number }}"
+
+  # 5. 通知和报告
+  notify:
+    name: Notify and Report
+    runs-on: ubuntu-latest
+    needs: [quality, eas-build-preview, eas-build-production]
+    if: always()
+    
+    steps:
+      - name: Generate build report
+        run: |
+          echo "# CI/CD 构建报告" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📊 构建概览" >> $GITHUB_STEP_SUMMARY
+          echo "- **仓库**: ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **分支**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **提交**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **触发者**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## ✅ 作业状态" >> $GITHUB_STEP_SUMMARY
+          echo "| 作业 | 状态 |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 代码质量检查 | ${{ needs.quality.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "| EAS 预览构建 | ${{ needs.eas-build-preview.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "| EAS 生产构建 | ${{ needs.eas-build-production.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## 🚀 下一步" >> $GITHUB_STEP_SUMMARY
+          echo "1. 查看测试结果和代码覆盖率" >> $GITHUB_STEP_SUMMARY
+          echo "2. 在 Expo EAS 控制台下载构建产物" >> $GITHUB_STEP_SUMMARY
+          echo "3. 分发到测试人员或应用商店" >> $GITHUB_STEP_SUMMARY
+
+      - name: Send Slack notification
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,action,eventName,ref,workflow,job,took
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
