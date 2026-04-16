@@ -85,7 +85,8 @@ jobs:
               eas build --platform android --profile preview --non-interactive
             else
               echo "EXPO_TOKEN not set, skipping EAS build"
-              # 本地构建
+              # 预构建然后本地构建
+              npx expo prebuild --platform android --clean
               cd android && ./gradlew assembleRelease
             fi
           else
